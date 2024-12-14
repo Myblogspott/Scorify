@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scorify - Interactive AI Assistant</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.5/font/bootstrap.min.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f8f9fa;
+            margin: 0;
+        }
+        .card {
+            max-width: 600px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            background: #fff;
+            text-align: center;
+        }
+        .btn {
+            width: 100%;
+            font-size: 1.2rem;
+            margin-top: 15px;
+        }
+        video {
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Scorify - Interactive AI Assistant</h2>
+        <p class="mt-3">Click <strong>Record</strong> to speak on a topic, and then click <strong>Hints</strong> to receive topic-based hints. Used only for modules - <strong>Listen, Then Speak</strong> and <strong>Interactive Listening. Do not keep the text under the camera unless, You need an answer.</strong></p>
+        <button id="recordButton" class="btn btn-primary"><i class="bi bi-mic"></i> Record Topic</button>
+        <button id="hintsButton" class="btn btn-info" disabled><i class="bi bi-lightbulb"></i> Get Hint</button>
+        <p class="mt-3">Or use <strong>Activate Camera</strong> to detect text from the video feed and process it using AI. No Need to use the Summarize Conversation Button instead show the <strong>"Summarize the Topic for 75 seconds into the camera."</strong> For <strong>"Speaking Sample"</strong>record the question by reciting and click on <strong>Hints</strong> Good Luck for your test!!</p>
+        <button id="activateCameraButton" class="btn btn-secondary"><i class="bi bi-camera-video"></i> Activate Camera</button>
+        <button id="interactiveLearningButton" class="btn btn-warning mt-3"><i class="bi bi-chat-dots"></i> Interactive Learning</button>
+        <video id="videoFeed" autoplay></video>
+    </div>
+
+    <script>
+        const recordButton = document.getElementById('recordButton');
+        const hintsButton = document.getElementById('hintsButton');
+        const activateCameraButton = document.getElementById('activateCameraButton');
+        const interactiveLearningButton = document.getElementById('interactiveLearningButton');
+        const videoFeed = document.getElementById('videoFeed');
+        let recordedTopic = "";
+        let interactiveMode = false;
+
+        // Speech Recognition for Recording Topic
+        async function startRecording() {
+            let recognition;
+            try {
+                recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.lang = "en-US";
+                recognition.interimResults = false;
+
+                recognition.onresult = (event) => {
+                    recordedTopic = event.results[0][0].transcript;
+                    console.log("Recorded Topic:", recordedTopic);
+
+                    hintsButton.disabled = false;
+
+                    // Speak a confirmation
+                    const confirmation = new SpeechSynthesisUtterance(`Topic recorded: ${recordedTopic}.`);
+                    confirmation.lang = "en-IN";
+                    speechSynthesis.speak(confirmation);
+                };
+
+                recognition.onerror = (error) => {
+                    console.error("Speech recognition error:", error);
+                };
+
+                recognition.start();
+
+                // Timeout for 90 seconds
+                setTimeout(() => recognition.stop(), 90000);
+
+            } catch (error) {
+                console.error("Speech recognition not supported or failed:", error);
+            }
+        }
+
+        // Generate a Single Hint using GPT
+        async function generateHint() {
+            try {
+                if (!recordedTopic) {
+                    throw new Error("No topic recorded.");
+                }
+
+                const prompt = `Provide a single concise hint about the following topic:
+
+"${recordedTopic}"`;
+
+                const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: "Bearer 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"
+                    },
+                    body: JSON.stringify({
+                        model: "gpt-4",
+                        messages: [{ role: "user", content: prompt }],
+                        max_tokens: 50
+                    })
+                });
+
+                if (!gptResponse.ok) {
+                    throw new Error("GPT API Error");
+                }
+
+                const gptData = await gptResponse.json();
+                const hint = gptData.choices?.[0]?.message?.content?.trim();
+
+                if (!hint) {
+                    throw new Error("No hint generated by GPT.");
+                }
+
+                console.log("Generated Hint:", hint);
+
+                // Speak the hint
+                const utterance = new SpeechSynthesisUtterance(hint);
+                utterance.lang = "en-IN";
+                speechSynthesis.speak(utterance);
+
+            } catch (error) {
+                console.error("Error generating hint:", error);
+            }
+        }
+
+        // Activate Camera Functionality
+        async function activateCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoFeed.srcObject = stream;
+                videoFeed.style.display = "block";
+
+                // Periodically process video feed for text
+                setInterval(() => {
+                    processFrame();
+                }, 3000);
+            } catch (error) {
+                alert("Unable to access the camera. Please check permissions.");
+                console.error("Camera activation failed:", error);
+            }
+        }
+
+        // Process Frame Functionality
+        async function processFrame() {
+            if (!interactiveMode) return;
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+
+            // Ensure canvas dimensions match video feed dimensions
+            canvas.width = videoFeed.videoWidth || 640;
+            canvas.height = videoFeed.videoHeight || 480;
+
+            // Draw the video frame onto the canvas
+            context.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+
+            // Convert canvas to Base64
+            const imageData = canvas.toDataURL('image/jpeg').split(",")[1];
+
+            try {
+                // Send the image to Google Vision API
+                const visionResponse = await fetch("https://vision.googleapis.com/v1/images:annotate?key=AIzaSyDaxpfOkQbVWG-RkeEH1thGgCaxitHvA3I", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        requests: [
+                            {
+                                image: { content: imageData },
+                                features: [{ type: "TEXT_DETECTION" }]
+                            }
+                        ]
+                    })
+                });
+
+                if (!visionResponse.ok) {
+                    throw new Error(`Google Vision API Error: ${visionResponse.statusText}`);
+                }
+
+                const visionResult = await visionResponse.json();
+                const extractedText = visionResult.responses?.[0]?.fullTextAnnotation?.text?.trim();
+
+                if (!extractedText) {
+                    console.log("No text detected.");
+                    return;
+                }
+
+                console.log("Extracted Text:", extractedText);
+
+                // Process the text with GPT-4 and match with the topic
+                const prompt = `Based on the recorded topic: "${recordedTopic}", select the best option from the following detected text:
+
+"${extractedText}"`;
+
+                const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: "Bearer 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"
+                    },
+                    body: JSON.stringify({
+                        model: "gpt-4",
+                        messages: [{ role: "user", content: prompt }],
+                        max_tokens: 200
+                    })
+                });
+
+                if (!gptResponse.ok) {
+                    throw new Error("GPT-4 API Error");
+                }
+
+                const gptData = await gptResponse.json();
+                const answer = gptData.choices?.[0]?.message?.content?.trim();
+
+                if (!answer) {
+                    console.log("No valid question detected. No response generated.");
+                    return;
+                }
+
+                console.log("Generated Answer:", answer);
+
+                                // Speak the answer
+                                const utterance = new SpeechSynthesisUtterance(answer);
+                utterance.lang = "en-IN";
+                utterance.onerror = (error) => console.error("Speech synthesis error:", error);
+                utterance.onend = () => console.log("Speech synthesis completed.");
+                speechSynthesis.speak(utterance);
+
+            } catch (error) {
+                console.error("Error during text detection and processing:", error);
+            }
+        }
+
+        // Interactive Learning Functionality
+        async function interactiveLearning() {
+            interactiveMode = true;
+            alert("Interactive Learning Mode Enabled");
+        }
+
+// Summarize the Conversation
+async function summarizeConversation() {
+    try {
+        if (!recordedTopic) {
+            throw new Error("No topic recorded.");
+        }
+
+        const prompt = `
+You are assisting a user practicing for a Duolingo test. Create a summary of the practice session in the following format:
+
+"I was unclear about the [detected topic/issue] that was brought up during the session. However, the correct answer identified was [answer]."
+
+Use the topic "${recordedTopic}" and answers generated during the session to create this summary. Focus on clarity and educational feedback for test preparation.
+`;
+
+        const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer YOUR_OPENAI_API_KEY"
+            },
+            body: JSON.stringify({
+                model: "gpt-4",
+                messages: [{ role: "user", content: prompt }],
+                max_tokens: 300
+            })
+        });
+
+        if (!gptResponse.ok) {
+            throw new Error("GPT-4 API Error");
+        }
+
+        const gptData = await gptResponse.json();
+        const summary = gptData.choices?.[0]?.message?.content?.trim();
+
+        if (!summary) {
+            throw new Error("No summary generated.");
+        }
+
+        console.log("Generated Summary:", summary);
+
+        // Display the summary on the UI instead of speaking it
+        alert(`Summary of Conversation:\n\n${summary}`);
+
+
+        // Speak the summary
+        const utterance = new SpeechSynthesisUtterance(summary);
+        utterance.lang = "en-IN";
+        utterance.onerror = (error) => console.error("Speech synthesis error:", error);
+        utterance.onend = () => console.log("Speech synthesis completed.");
+        speechSynthesis.speak(utterance);
+
+    } catch (error) {
+        console.error("Error summarizing conversation:", error);
+    }
+}
+
+
+        // Event Listeners
+        recordButton.addEventListener("click", startRecording);
+        hintsButton.addEventListener("click", generateHint);
+        activateCameraButton.addEventListener("click", activateCamera);
+        interactiveLearningButton.addEventListener("click", interactiveLearning);
+
+        // Additional logic for summarizing conversation
+        const summarizeButton = document.createElement("button");
+        summarizeButton.className = "btn btn-dark mt-3";
+        summarizeButton.innerHTML = '<i class="bi bi-list-ul"></i> Summarize Conversation';
+        document.querySelector(".card").appendChild(summarizeButton);
+        summarizeButton.addEventListener("click", summarizeConversation);
+    </script>
+</body>
+</html>
+
